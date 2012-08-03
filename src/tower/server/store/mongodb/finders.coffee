@@ -1,3 +1,6 @@
+# Future = require('fibers/future')
+# Future.prototype._return = Future.prototype.return
+
 # @module
 Tower.Store.Mongodb.Finders =
   # Find and return an array of documents.
@@ -9,21 +12,41 @@ Tower.Store.Mongodb.Finders =
     conditions  = @serializeConditions(cursor)
     options     = @serializeOptions(cursor)
 
-    @collection().find(conditions, options).toArray (error, docs) =>
-      unless error
-        unless cursor.raw
-          for doc in docs
-            doc.id = doc['_id']
-            delete doc['_id']
+    @_respond callback, (respond) =>
+      @collection().find(conditions, options).toArray (error, docs) =>
+        unless error
+          unless cursor.raw
+            for doc in docs
+              doc.id = doc['_id']
+              delete doc['_id']
 
-          docs = @serialize(docs, true)
+            docs = @serialize(docs, true)
 
-          for model in docs
-            model.set('isNew', false)
+            for model in docs
+              model.set('isNew', false)
 
-      callback.call(@, error, docs) if callback
+        respond(error, docs)
+
+  _respond: (callback, block) ->
+    block.call @, (error, result) =>
+      callback.call(@, error, result) if callback
 
     undefined
+
+  _respondWithFuture: (callback, block) ->
+    future = new Future
+    
+    block.call @, (error, result) =>
+      future._return([error, result])
+
+    [error, result] = future.wait()
+
+    if callback
+      callback.call(@, error, result)
+    else
+      throw error if error
+      
+    result
 
   # @return undefined Requires a callback to get the value.
   findOne: (cursor, callback) ->
@@ -56,5 +79,8 @@ Tower.Store.Mongodb.Finders =
       callback.call(@, error, count > 0) if callback
 
     undefined
+
+if Tower.isSync
+  Tower.Store.Mongodb.Finders.respond = Tower.Store.Mongodb.Finders._respondWithFuture
 
 module.exports = Tower.Store.Mongodb.Finders
